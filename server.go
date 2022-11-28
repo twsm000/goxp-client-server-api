@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,11 +10,14 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
 	requestTimeout  time.Duration
 	databaseTimeout time.Duration
+	db              *sql.DB
 )
 
 const (
@@ -23,6 +27,7 @@ const (
 
 func main() {
 	parseContextTimeouts()
+	startDatabase()
 	startHTTPServer()
 }
 
@@ -46,6 +51,31 @@ func parseContextTimeouts() {
 		log.Fatalln("Invalid", databaseTimeoutUsage)
 	}
 	databaseTimeout = d
+}
+
+func startDatabase() {
+	var err error
+	db, err = sql.Open("sqlite3", "file:cotacao.db")
+	if err != nil {
+		log.Fatalln("Falhou abrir o banco de dados:", err)
+	}
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS cotacao(
+		code TEXT, 
+		code_in TEXT, 
+		name TEXT, 
+		high TEXT, 
+		low TEXT,
+		var_bid TEXT,
+		pct_change TEXT,
+		bid TEXT,
+		ask TEXT,
+		timestamp TEXT,
+		create_date TEXT
+	)`)
+	if err != nil {
+		log.Fatalln("Falha ao criar tabela de cotacao:", err)
+	}
 }
 
 func startHTTPServer() {
@@ -91,6 +121,13 @@ func cotacaoHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = saveQuotationToDB(r.Context(), &cotacao)
+	if err != nil {
+		msg := fmt.Sprint("GET /cotacao - falha ao salvar dados no banco: ", err)
+		sendMsgError(w, msg, http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(w).Encode(QuotationResponse{cotacao.Bid})
 	if err != nil {
@@ -106,6 +143,49 @@ func sendMsgError(w http.ResponseWriter, msg string, statusCode int) {
 	log.Println(msg)
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
+}
+
+func saveQuotationToDB(ctx context.Context, cotacao *USDBRLQuotation) error {
+	stmt, err := db.Prepare(`
+		INSERT INTO cotacao(
+			code,
+			code_in,
+			name,
+			high,
+			low,
+			var_bid,
+			pct_change,
+			bid,
+			ask,
+			timestamp,
+			create_date
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("falha ao preparar query. %w", err)
+	}
+
+	dbCtx, cancel := context.WithTimeout(ctx, databaseTimeout)
+	defer cancel()
+
+	_, err = stmt.ExecContext(
+		dbCtx,
+		cotacao.Code,
+		cotacao.CodeIn,
+		cotacao.Name,
+		cotacao.High,
+		cotacao.Low,
+		cotacao.VarBid,
+		cotacao.PctChange,
+		cotacao.Bid,
+		cotacao.Ask,
+		cotacao.Timestamp,
+		cotacao.CreateDate,
+	)
+	if err != nil {
+		return fmt.Errorf("falha ao executar query. %w", err)
+	}
+	return nil
 }
 
 type ErrorResponse struct {
