@@ -9,48 +9,59 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
-	requestTimeout  time.Duration
-	databaseTimeout time.Duration
-	db              *sql.DB
+	requestTimeout   time.Duration
+	databaseTimeout  time.Duration
+	serverPortNumber uint16
+	db               *sql.DB
 )
 
 const (
 	requestTimeoutUsage  string = "request timout usage: -rt 200ms or -rt 1s or -rt 1m"
 	databaseTimeoutUsage string = "database timetout usage: -dbt 10ms or -dbt 1s"
+	serverPortUsage      string = "server port usage: -p 8080 or -p 3000 (range from 0 to 65535)"
 )
 
 func main() {
-	parseContextTimeouts()
+	parseFlagValues()
 	startDatabase()
 	startHTTPServer()
 }
 
-func parseContextTimeouts() {
+func parseFlagValues() {
 	var (
 		reqTimeout string
 		dbTimeout  string
+		portNumber string
 	)
 
 	flag.StringVar(&reqTimeout, "rt", "200ms", requestTimeoutUsage)
 	flag.StringVar(&dbTimeout, "dbt", "10ms", databaseTimeoutUsage)
+	flag.StringVar(&portNumber, "p", "8080", serverPortUsage)
 	flag.Parse()
 	d, err := time.ParseDuration(reqTimeout)
 	if err != nil {
-		log.Fatalln("Invalid", requestTimeoutUsage)
+		log.Fatalln("Invalid argument,", requestTimeoutUsage)
 	}
 	requestTimeout = d
 
 	d, err = time.ParseDuration(dbTimeout)
 	if err != nil {
-		log.Fatalln("Invalid", databaseTimeoutUsage)
+		log.Fatalln("Invalid argument,", databaseTimeoutUsage)
 	}
 	databaseTimeout = d
+
+	spn, err := strconv.ParseUint(portNumber, 10, 16)
+	if err != nil {
+		log.Fatalln("Invalid argument,", serverPortUsage)
+	}
+	serverPortNumber = uint16(spn)
 }
 
 func startDatabase() {
@@ -79,11 +90,13 @@ func startDatabase() {
 }
 
 func startHTTPServer() {
+	portNumber := fmt.Sprint(":", serverPortNumber)
 	http.HandleFunc("/cotacao", cotacaoHandler)
-	log.Println("Iniciando servidor na porta :8080")
+	log.Println("Iniciando servidor na porta", portNumber)
 	log.Println("Request timeout:", requestTimeout)
 	log.Println("Database timeout:", databaseTimeout)
-	if err := http.ListenAndServe(":8080", nil); !errors.Is(err, http.ErrServerClosed) {
+	err := http.ListenAndServe(portNumber, nil)
+	if !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalln("*** ERROR ***:", err)
 	}
 }
