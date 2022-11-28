@@ -155,7 +155,7 @@ const cotacaoURL string = "https://economia.awesomeapi.com.br/json/last/USD-BRL"
 func sendMsgError(w http.ResponseWriter, msg string, statusCode int) {
 	log.Println(msg)
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
+	json.NewEncoder(w).Encode(ErrorResponse{Error: msg, StatusCode: statusCode})
 }
 
 func saveQuotationToDB(ctx context.Context, cotacao *USDBRLQuotation) error {
@@ -202,7 +202,8 @@ func saveQuotationToDB(ctx context.Context, cotacao *USDBRLQuotation) error {
 }
 
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Error      string `json:"error"`
+	StatusCode int    `json:"status_code"`
 }
 
 type QuotationResponse struct {
